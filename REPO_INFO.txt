@@ -1,0 +1,36 @@
+==============================================
+DATAFLOW - MICROSERVIÇO DE INGESTÃO
+==============================================
+
+📦 REPOSITÓRIO CRIADO COM SUCESSO!
+
+🔗 URL: https://github.com/ivisribeiro/dataflow-ingestion-service
+
+📋 CONTEÚDO:
+  ✅ docker-compose.yml - Configuração completa do Airbyte
+  ✅ README.md - Documentação detalhada
+  ✅ QUICKSTART.md - Guia rápido de início
+  ✅ .env.example - Variáveis de ambiente
+  ✅ .gitignore - Arquivos ignorados
+
+🎯 O QUE ESTÁ INCLUÍDO:
+  • Airbyte Web UI (porta 8000)
+  • Airbyte API (porta 8001)
+  • PostgreSQL (porta 5432)
+  • Temporal (workflow engine)
+  • Worker (executor de jobs)
+  • Cron (agendador)
+
+🚀 COMO USAR:
+  1. git clone https://github.com/ivisribeiro/dataflow-ingestion-service.git
+  2. cd dataflow-ingestion-service
+  3. cp .env.example .env
+  4. docker-compose up -d
+  5. Acesse http://localhost:8000
+
+📚 DOCUMENTAÇÃO:
+  • README.md - Guia completo
+  • QUICKSTART.md - Início rápido
+  • Airbyte Docs: https://docs.airbyte.com/
+
+==============================================
