@@ -1,0 +1,192 @@
+version: '3.8'
+
+services:
+  # PostgreSQL - Database for Airbyte metadata
+  postgres:
+    image: postgres:15-alpine
+    container_name: airbyte-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: airbyte
+      POSTGRES_PASSWORD: airbyte123
+      POSTGRES_DB: airbyte
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - airbyte-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airbyte"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Airbyte Init - Initialize directories
+  init:
+    image: airbyte/init:0.50.33
+    container_name: airbyte-init
+    command: /bin/sh -c "./scripts/create_mount_directories.sh /local_parent ${HACK_LOCAL_ROOT_PARENT} ${LOCAL_ROOT}"
+    environment:
+      LOCAL_ROOT: /tmp/airbyte_local
+      HACK_LOCAL_ROOT_PARENT: /tmp
+    volumes:
+      - airbyte_local:/tmp/airbyte_local
+    networks:
+      - airbyte-network
+
+  # Airbyte Bootloader - Setup database schema
+  bootloader:
+    image: airbyte/bootloader:0.50.33
+    container_name: airbyte-bootloader
+    restart: on-failure
+    depends_on:
+      postgres:
+        condition: service_healthy
+      init:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_USER: airbyte
+      DATABASE_PASSWORD: airbyte123
+      DATABASE_URL: jdbc:postgresql://postgres:5432/airbyte
+      LOG_LEVEL: INFO
+    networks:
+      - airbyte-network
+
+  # Airbyte Temporal - Workflow engine
+  temporal:
+    image: airbyte/temporal:0.50.33
+    container_name: airbyte-temporal
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB: postgresql
+      DB_PORT: 5432
+      POSTGRES_USER: airbyte
+      POSTGRES_PWD: airbyte123
+      POSTGRES_SEEDS: postgres
+      DYNAMIC_CONFIG_FILE_PATH: config/dynamicconfig/development.yaml
+      LOG_LEVEL: INFO
+    networks:
+      - airbyte-network
+
+  # Airbyte Server - API backend
+  server:
+    image: airbyte/server:0.50.33
+    container_name: airbyte-server
+    restart: unless-stopped
+    depends_on:
+      bootloader:
+        condition: service_completed_successfully
+    environment:
+      AIRBYTE_VERSION: 0.50.33
+      CONFIG_DATABASE_PASSWORD: airbyte123
+      CONFIG_DATABASE_URL: jdbc:postgresql://postgres:5432/airbyte
+      CONFIG_DATABASE_USER: airbyte
+      CONFIGS_DATABASE_MINIMUM_FLYWAY_MIGRATION_VERSION: 0.35.15.001
+      DATABASE_PASSWORD: airbyte123
+      DATABASE_URL: jdbc:postgresql://postgres:5432/airbyte
+      DATABASE_USER: airbyte
+      JOBS_DATABASE_MINIMUM_FLYWAY_MIGRATION_VERSION: 0.29.15.001
+      LOG_LEVEL: INFO
+      TEMPORAL_HOST: temporal:7233
+      TRACKING_STRATEGY: logging
+      WEBAPP_URL: http://localhost:8000
+      WORKER_ENVIRONMENT: docker
+      WORKSPACE_ROOT: /workspace
+    ports:
+      - "8001:8001"
+    volumes:
+      - airbyte_workspace:/workspace
+      - airbyte_local:/tmp/airbyte_local
+    networks:
+      - airbyte-network
+
+  # Airbyte Worker - Executes sync jobs
+  worker:
+    image: airbyte/worker:0.50.33
+    container_name: airbyte-worker
+    restart: unless-stopped
+    depends_on:
+      bootloader:
+        condition: service_completed_successfully
+      temporal:
+        condition: service_started
+    environment:
+      AIRBYTE_VERSION: 0.50.33
+      AUTO_DETECT_SCHEMA: "true"
+      DATABASE_PASSWORD: airbyte123
+      DATABASE_URL: jdbc:postgresql://postgres:5432/airbyte
+      DATABASE_USER: airbyte
+      INTERNAL_API_HOST: server:8001
+      LOCAL_ROOT: /tmp/airbyte_local
+      LOG_LEVEL: INFO
+      TEMPORAL_HOST: temporal:7233
+      TRACKING_STRATEGY: logging
+      WEBAPP_URL: http://localhost:8000
+      WORKER_ENVIRONMENT: docker
+      WORKSPACE_DOCKER_MOUNT: airbyte_workspace
+      WORKSPACE_ROOT: /workspace
+    volumes:
+      - airbyte_workspace:/workspace
+      - airbyte_local:/tmp/airbyte_local
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - airbyte-network
+
+  # Airbyte Webapp - Web UI
+  webapp:
+    image: airbyte/webapp:0.50.33
+    container_name: airbyte-webapp
+    restart: unless-stopped
+    depends_on:
+      server:
+        condition: service_started
+    environment:
+      AIRBYTE_VERSION: 0.50.33
+      API_URL: /api/v1/
+      INTERNAL_API_HOST: server:8001
+      TRACKING_STRATEGY: logging
+    ports:
+      - "8000:80"
+    networks:
+      - airbyte-network
+
+  # Airbyte Cron - Scheduled tasks
+  cron:
+    image: airbyte/cron:0.50.33
+    container_name: airbyte-cron
+    restart: unless-stopped
+    depends_on:
+      bootloader:
+        condition: service_completed_successfully
+    environment:
+      AIRBYTE_VERSION: 0.50.33
+      CONFIGS_DATABASE_MINIMUM_FLYWAY_MIGRATION_VERSION: 0.35.15.001
+      DATABASE_PASSWORD: airbyte123
+      DATABASE_URL: jdbc:postgresql://postgres:5432/airbyte
+      DATABASE_USER: airbyte
+      JOBS_DATABASE_MINIMUM_FLYWAY_MIGRATION_VERSION: 0.29.15.001
+      LOG_LEVEL: INFO
+      TEMPORAL_HISTORY_RETENTION_IN_DAYS: 30
+      TRACKING_STRATEGY: logging
+      WORKSPACE_ROOT: /workspace
+    volumes:
+      - airbyte_workspace:/workspace
+    networks:
+      - airbyte-network
+
+networks:
+  airbyte-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local
+  airbyte_workspace:
+    driver: local
+  airbyte_local:
+    driver: local
+
